@@ -17,6 +17,7 @@
 #include "globalvars.h"
 #include "icvar.h"
 #include "interface.h"
+#include "interfaces/interfaces.h" // g_pSource2Server, g_pSource2GameClients externs
 #include "irecipientfilter.h"
 #include "networksystem/inetworkmessages.h"
 #include "networksystem/netmessage.h"
@@ -37,11 +38,11 @@
 // ---------------------------------------------------------------------------
 Reklama g_Reklama;
 
+// g_pSource2Server, g_pSource2GameClients (interfaces.h), g_pCVar (icvar.h) and
+// g_pNetworkMessages (inetworkmessages.h) are already declared+defined by the SDK.
+// Only these two are not provided by the SDK, so we define them ourselves:
 IVEngineServer2* g_pEngineServer2 = nullptr;
-ISource2Server* g_pSource2Server = nullptr;
-IServerGameClients* g_pSource2GameClients = nullptr;
 IGameEventSystem* g_gameEventSystem = nullptr;
-// g_pCVar (icvar.h) and g_pNetworkMessages (inetworkmessages.h) are SDK-declared.
 
 PLUGIN_EXPOSE(Reklama, g_Reklama);
 
