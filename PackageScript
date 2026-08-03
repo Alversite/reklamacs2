@@ -1,0 +1,32 @@
+# vim: set ts=2 sw=2 tw=99 noet ft=python:
+import os
+
+builder.SetBuildFolder('package')
+
+name = MMSPlugin.metadata['name']  # "Reklama"
+
+# Flat layout that matches the original install / VDF ("file" -> addons/Reklama/Reklama):
+#   addons/Reklama/Reklama.so
+#   addons/metamod/Reklama.vdf
+#   addons/configs/Reklama/settings.ini
+plugin_folder = builder.AddFolder(os.path.join('addons', name))
+metamod_folder = builder.AddFolder(os.path.join('addons', 'metamod'))
+configs_folder = builder.AddFolder(os.path.join('addons', 'configs', name))
+
+# The VDF Metamod uses to load the plugin.
+vdf_content = '"Metamod Plugin"\n{\n'
+vdf_content += f'\t"alias"\t"{name}"\n'
+vdf_content += f'\t"file"\t"addons/{name}/{name}"\n'
+vdf_content += '}\n'
+builder.AddOutputFile(os.path.join('addons', 'metamod', f'{name}.vdf'), vdf_content.encode('utf8'))
+
+# Ship the config as a default (server keeps its own copy).
+builder.AddCopy(
+  os.path.join(builder.sourcePath, 'configs', 'addons', 'configs', name, 'settings.ini'),
+  configs_folder)
+
+for task in MMSPlugin.binaries:
+  # Built binary is e.g. "Reklama.cs2.so" -> install as "Reklama.so".
+  binary = task.binary
+  ext = os.path.splitext(binary.path)[1]  # ".so" / ".dll"
+  builder.AddCopy(binary, os.path.join('addons', name, f'{name}{ext}'))
