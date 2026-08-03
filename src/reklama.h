@@ -11,6 +11,8 @@
 #include <ISmmPlugin.h>
 #include <iserver.h>
 
+#include "eiface.h" // ISource2Server/GameClients, CPlayerSlot, ENetworkDisconnectionReason
+
 #include <string>
 #include <vector>
 
@@ -26,7 +28,7 @@ public:
 public: // SourceHook callbacks
 	void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick);
 	void Hook_ClientActive(CPlayerSlot slot, bool bLoadGame, const char* pszName, uint64 xuid);
-	void Hook_ClientDisconnect(CPlayerSlot slot, int reason, const char* pszName, uint64 xuid, const char* pszNetworkID);
+	void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID);
 
 public: // logic
 	void LoadConfig();

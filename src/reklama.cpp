@@ -49,7 +49,7 @@ PLUGIN_EXPOSE(Reklama, g_Reklama);
 // derives from it); the client callbacks live on IServerGameClients.
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
 SH_DECL_HOOK4_void(IServerGameClients, ClientActive, SH_NOATTRIB, 0, CPlayerSlot, bool, const char*, uint64);
-SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot, int, const char*, uint64, const char*);
+SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*);
 
 static CGlobalVars* GetGlobals()
 {
@@ -397,7 +397,9 @@ static void SendTextMsg(int hudDest, const char* text)
 	if (!pNetMsg)
 		return;
 
-	CUserMessageTextMsg* pData = pNetMsg->AllocateMessage()->ToPB<CUserMessageTextMsg>();
+	// Keep the CNetMessagePB<> type: it inherits both the protobuf message (for
+	// set_dest/add_param) and CNetMessage (required by PostEventAbstract).
+	auto* pData = pNetMsg->AllocateMessage()->ToPB<CUserMessageTextMsg>();
 	pData->set_dest(hudDest);
 	pData->add_param(text);
 
@@ -486,7 +488,7 @@ void Reklama::Hook_ClientActive(CPlayerSlot slot, bool bLoadGame, const char* ps
 		m_bConnected[i] = true;
 }
 
-void Reklama::Hook_ClientDisconnect(CPlayerSlot slot, int reason, const char* pszName, uint64 xuid, const char* pszNetworkID)
+void Reklama::Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID)
 {
 	int i = slot.Get();
 	if (i >= 0 && i < 64)
