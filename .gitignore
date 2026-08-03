@@ -5,4 +5,3 @@
 *.pdb
 __pycache__/
 plugin-metadata.json
-.github/
