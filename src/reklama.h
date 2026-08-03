@@ -27,8 +27,6 @@ public:
 
 public: // SourceHook callbacks
 	void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick);
-	void Hook_ClientActive(CPlayerSlot slot, bool bLoadGame, const char* pszName, uint64 xuid);
-	void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID);
 
 public: // logic
 	void LoadConfig();
@@ -46,9 +44,6 @@ public: // ISmmPlugin metadata
 	const char* GetLogTag() { return "REKLAMA"; }
 
 public: // state
-	// Which slots currently have a connected human/bot able to receive messages.
-	bool m_bConnected[64] = {};
-
 	int m_iChatInterval = 25;
 	int m_iCenterInterval = 40;
 

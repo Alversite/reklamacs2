@@ -46,11 +46,9 @@ IGameEventSystem* g_gameEventSystem = nullptr;
 
 PLUGIN_EXPOSE(Reklama, g_Reklama);
 
-// SourceHook declarations. GameFrame lives on IServerGameDLL (ISource2Server
-// derives from it); the client callbacks live on IServerGameClients.
+// SourceHook declaration. GameFrame lives on IServerGameDLL (ISource2Server
+// derives from it) and drives our timers.
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, 0, bool, bool, bool);
-SH_DECL_HOOK4_void(IServerGameClients, ClientActive, SH_NOATTRIB, 0, CPlayerSlot, bool, const char*, uint64);
-SH_DECL_HOOK5_void(IServerGameClients, ClientDisconnect, SH_NOATTRIB, 0, CPlayerSlot, ENetworkDisconnectionReason, const char*, uint64, const char*);
 
 static CGlobalVars* GetGlobals()
 {
@@ -58,16 +56,30 @@ static CGlobalVars* GetGlobals()
 }
 
 // ---------------------------------------------------------------------------
-// Recipient filter that targets every currently-connected slot
+// Recipient filter that targets every currently-connected client.
+// Connected players are detected via the engine (GetPlayerNetInfo != null),
+// so this works regardless of when the plugin was loaded (e.g. `meta load`
+// while players are already on the server) and needs no connect/disconnect
+// bookkeeping.
 // ---------------------------------------------------------------------------
 class CBroadcastFilter : public IRecipientFilter
 {
 public:
 	CBroadcastFilter()
 	{
-		for (int i = 0; i < 64; i++)
-			if (g_Reklama.m_bConnected[i])
+		CGlobalVars* pGlobals = GetGlobals();
+		int maxClients = pGlobals ? pGlobals->maxClients : 64;
+		if (maxClients > 64)
+			maxClients = 64;
+
+		for (int i = 0; i < maxClients; i++)
+		{
+			if (g_pEngineServer2->GetPlayerNetInfo(i))
+			{
 				m_Recipients.Set(i);
+				m_iCount++;
+			}
+		}
 	}
 
 	~CBroadcastFilter() override {}
@@ -77,16 +89,12 @@ public:
 	const CPlayerBitVec& GetRecipients() const override { return m_Recipients; }
 	CPlayerSlot GetPredictedPlayerSlot() const override { return -1; }
 
-	bool HasRecipients() const
-	{
-		for (int i = 0; i < 64; i++)
-			if (g_Reklama.m_bConnected[i])
-				return true;
-		return false;
-	}
+	int Count() const { return m_iCount; }
+	bool HasRecipients() const { return m_iCount > 0; }
 
 private:
 	CPlayerBitVec m_Recipients;
+	int m_iCount = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -385,18 +393,20 @@ void Reklama::LoadConfig()
 // ---------------------------------------------------------------------------
 // Message sending
 // ---------------------------------------------------------------------------
-static void SendTextMsg(int hudDest, const char* text)
+// Returns number of recipients the message was sent to, or -1 if the
+// networking interfaces are missing.
+static int SendTextMsg(int hudDest, const char* text)
 {
 	if (!g_pNetworkMessages || !g_gameEventSystem)
-		return;
+		return -1;
 
 	CBroadcastFilter filter;
 	if (!filter.HasRecipients())
-		return;
+		return 0;
 
 	INetworkMessageInternal* pNetMsg = g_pNetworkMessages->FindNetworkMessagePartial("TextMsg");
 	if (!pNetMsg)
-		return;
+		return -1;
 
 	// Keep the CNetMessagePB<> type: it inherits both the protobuf message (for
 	// set_dest/add_param) and CNetMessage (required by PostEventAbstract).
@@ -407,6 +417,7 @@ static void SendTextMsg(int hudDest, const char* text)
 	g_gameEventSystem->PostEventAbstract(-1, false, &filter, pNetMsg, pData, 0);
 
 	delete pData;
+	return filter.Count();
 }
 
 void Reklama::SendNextChatMessage()
@@ -418,8 +429,12 @@ void Reklama::SendNextChatMessage()
 		m_iChatIndex = 0;
 
 	const std::vector<std::string>& group = m_vecChatGroups[m_iChatIndex];
+	int recipients = 0;
 	for (const std::string& line : group)
-		SendTextMsg(3 /*HUD_PRINTTALK*/, line.c_str());
+		recipients = SendTextMsg(3 /*HUD_PRINTTALK*/, line.c_str());
+
+	Msg("[Reklama] chat message #%d (%d lines) -> %d players\n",
+		(int)m_iChatIndex + 1, (int)group.size(), recipients);
 
 	m_iChatIndex = (m_iChatIndex + 1) % m_vecChatGroups.size();
 }
@@ -432,7 +447,9 @@ void Reklama::SendNextCenterMessage()
 	if (m_iCenterIndex >= m_vecCenterMessages.size())
 		m_iCenterIndex = 0;
 
-	SendTextMsg(4 /*HUD_PRINTCENTER*/, m_vecCenterMessages[m_iCenterIndex].c_str());
+	int recipients = SendTextMsg(4 /*HUD_PRINTCENTER*/, m_vecCenterMessages[m_iCenterIndex].c_str());
+
+	Msg("[Reklama] center message #%d -> %d players\n", (int)m_iCenterIndex + 1, recipients);
 
 	m_iCenterIndex = (m_iCenterIndex + 1) % m_vecCenterMessages.size();
 }
@@ -482,20 +499,6 @@ void Reklama::Hook_GameFrame(bool simulating, bool bFirstTick, bool bLastTick)
 	}
 }
 
-void Reklama::Hook_ClientActive(CPlayerSlot slot, bool bLoadGame, const char* pszName, uint64 xuid)
-{
-	int i = slot.Get();
-	if (i >= 0 && i < 64)
-		m_bConnected[i] = true;
-}
-
-void Reklama::Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnectionReason reason, const char* pszName, uint64 xuid, const char* pszNetworkID)
-{
-	int i = slot.Get();
-	if (i >= 0 && i < 64)
-		m_bConnected[i] = false;
-}
-
 // ---------------------------------------------------------------------------
 // Metamod entry points
 // ---------------------------------------------------------------------------
@@ -508,11 +511,8 @@ bool Reklama::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool 
 	GET_V_IFACE_ANY(GetEngineFactory, g_gameEventSystem, IGameEventSystem, GAMEEVENTSYSTEM_INTERFACE_VERSION);
 	GET_V_IFACE_ANY(GetEngineFactory, g_pNetworkMessages, INetworkMessages, NETWORKMESSAGES_INTERFACE_VERSION);
 	GET_V_IFACE_ANY(GetServerFactory, g_pSource2Server, ISource2Server, SOURCE2SERVER_INTERFACE_VERSION);
-	GET_V_IFACE_ANY(GetServerFactory, g_pSource2GameClients, IServerGameClients, SOURCE2GAMECLIENTS_INTERFACE_VERSION);
 
 	SH_ADD_HOOK(IServerGameDLL, GameFrame, g_pSource2Server, SH_MEMBER(this, &Reklama::Hook_GameFrame), true);
-	SH_ADD_HOOK(IServerGameClients, ClientActive, g_pSource2GameClients, SH_MEMBER(this, &Reklama::Hook_ClientActive), true);
-	SH_ADD_HOOK(IServerGameClients, ClientDisconnect, g_pSource2GameClients, SH_MEMBER(this, &Reklama::Hook_ClientDisconnect), true);
 
 	// Flush statically-constructed ConCommands (mm_reklama_reload) into the engine.
 	ConVar_Register(FCVAR_RELEASE | FCVAR_GAMEDLL);
@@ -526,8 +526,6 @@ bool Reklama::Load(PluginId id, ISmmAPI* ismm, char* error, size_t maxlen, bool 
 bool Reklama::Unload(char* error, size_t maxlen)
 {
 	SH_REMOVE_HOOK(IServerGameDLL, GameFrame, g_pSource2Server, SH_MEMBER(this, &Reklama::Hook_GameFrame), true);
-	SH_REMOVE_HOOK(IServerGameClients, ClientActive, g_pSource2GameClients, SH_MEMBER(this, &Reklama::Hook_ClientActive), true);
-	SH_REMOVE_HOOK(IServerGameClients, ClientDisconnect, g_pSource2GameClients, SH_MEMBER(this, &Reklama::Hook_ClientDisconnect), true);
 
 	ConVar_Unregister();
 
