@@ -217,6 +217,8 @@ public:
 		return ParseSection(root);
 	}
 
+	size_t Pos() const { return m_pos; }
+
 private:
 	const std::string& m_text;
 	size_t m_pos = 0;
@@ -343,11 +345,32 @@ void Reklama::LoadConfig()
 	ss << file.rdbuf();
 	std::string text = ss.str();
 
+	// Strip a UTF-8 BOM if present (some editors add it and it breaks parsing).
+	if (text.size() >= 3 && (unsigned char)text[0] == 0xEF && (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF)
+		text.erase(0, 3);
+
 	KVNode root;
 	KVParser parser(text);
 	if (!parser.Parse(root))
 	{
-		Warning("[Reklama] Failed to parse config %s\n", path.c_str());
+		size_t pos = parser.Pos();
+
+		// Dump a readable snippet around the failure point so the problem in the
+		// server's settings.ini can be pinpointed straight from the console.
+		size_t start = pos > 40 ? pos - 40 : 0;
+		std::string snippet;
+		for (size_t i = start; i < text.size() && i < start + 80; i++)
+		{
+			unsigned char c = (unsigned char)text[i];
+			if (c == '\n') snippet += "\\n";
+			else if (c == '\r') snippet += "\\r";
+			else if (c == '\t') snippet += "\\t";
+			else if (c >= 32 && c < 127) snippet += (char)c;
+			else { char b[8]; snprintf(b, sizeof(b), "<%02X>", c); snippet += b; }
+		}
+
+		Warning("[Reklama] Failed to parse config %s at byte %d/%d\n", path.c_str(), (int)pos, (int)text.size());
+		Warning("[Reklama] near: ...%s...\n", snippet.c_str());
 		return;
 	}
 
